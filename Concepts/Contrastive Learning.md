@@ -48,17 +48,6 @@ CLIP (Radford et al., 2021) trains a paired image encoder and text encoder using
 - Loss is symmetric: images-to-texts + texts-to-images
 
 Enables zero-shot classification and rich visual representations reusable downstream.
-
-## Applications in this Vault
-
-### Vision-Language Pretraining → VLAs
-SigLIP improves CLIP training and is used as the frozen visual backbone in many VLAs (OpenVLA, pi0).
-See: [[SigLIP]], [[VLA - Vision Language Action Models]]
-
-### Cross-View Geo-Localisation → OrienterNet
-OrienterNet trains a ground-image encoder and a map encoder contrastively: the correct (image, map tile) pair is the positive; all other tiles in the batch are negatives. The contrastive objective bridges the **domain gap** between ground-level perspective and top-down aerial/OSM map.
-See: [[OrienterNet]]
-
 ## Related Concepts
 
 - Metric learning (triplet loss is an older precursor)

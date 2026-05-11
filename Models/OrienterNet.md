@@ -56,7 +56,7 @@ See: [[Contrastive Learning]]
 
 Classical BEV methods (LSS, BEVFormer) explicitly predict depth to lift features into 3D. OrienterNet skips this: the contrastive training signal is strong enough to implicitly teach the BEV projection what structure corresponds to what map feature.
 
-See: [[Bird's Eye View (BEV)]]
+See: [[Concepts/BEV Localisation]]
 
 ## Limitations
 
@@ -68,4 +68,4 @@ See: [[Bird's Eye View (BEV)]]
 
 - [[Visual Localisation]] — the broader task
 - [[Contrastive Learning]] — core training paradigm
-- [[Bird's Eye View (BEV)]] — the representation
+- [[Concepts/BEV Localisation]] — the representation

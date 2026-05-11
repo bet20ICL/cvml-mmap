@@ -34,9 +34,3 @@ Converting monocular or multi-camera perspective images to BEV is a core challen
 ### OrienterNet approach
 - Does not use explicit depth — instead learns to produce BEV feature maps that are semantically aligned with aerial/map representations via contrastive training
 - See [[OrienterNet]]
-
-## Relationship to Localisation
-
-BEV representations make localisation tractable: if you can produce a BEV feature map from an image and have a database of map tiles in the same representation, localisation reduces to **2D matching**.
-
-See: [[Visual Localisation]], [[OrienterNet]]

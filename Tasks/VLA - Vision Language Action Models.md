@@ -59,4 +59,3 @@ VLAs benefit from large-scale VLP (via [[Contrastive Learning]]) because:
 ## Related
 
 - [[SigLIP]] — most common visual encoder
-- [[VLAs]] — MOC index

@@ -27,7 +27,7 @@ Match images from one viewpoint (e.g. ground) to a map from another (e.g. aerial
 
 ## BEV-Based Approaches
 
-Converting ground images to [[Bird's Eye View (BEV)|BEV]] allows direct comparison with top-down maps:
+Converting ground images to [[Concepts/BEV Localisation|BEV]] allows direct comparison with top-down maps:
 - Avoids 3D reconstruction — no need for a dense SfM map
 - Maps (OSM, satellite imagery) are freely available globally
 - See [[OrienterNet]] for a concrete system
@@ -53,5 +53,5 @@ Visual localisation answers "where am I in a known map?" SLAM answers "where am 
 ## Related
 
 - [[OrienterNet]] — BEV-based cross-view localisation
-- [[Bird's Eye View (BEV)]]
-- [[BEV Localisation]] — MOC index
+- [[Concepts/BEV Localisation]]
+

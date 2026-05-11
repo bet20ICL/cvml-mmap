@@ -1,5 +1,6 @@
 {
   "useMarkdownLinks": false,
   "newLinkFormat": "shortest",
-  "attachmentFolderPath": "Assets"
+  "attachmentFolderPath": "Assets",
+  "alwaysUpdateLinks": true
 }
