@@ -1,0 +1,7 @@
+- [ ] P0: [[DINO]]
+- [ ] P0: [[JEPA]]
+- [ ] P1: [[Diffusion Models]]
+- [ ] P1: [[Flow Matching]]
+- [ ] P2: [[Reinforcement Learning]]
+- [ ] P3: [[UniCorrn]]
+- [ ] 

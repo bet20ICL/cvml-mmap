@@ -1,0 +1,1 @@
+*Joint embedding predictive architecture*
