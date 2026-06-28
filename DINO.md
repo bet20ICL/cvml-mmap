@@ -25,6 +25,13 @@ Another idea is to use text captions to capture more details of the image: [[CLI
 Question: **can we learn strong image representations in a self supervised way?**
 - i.e. without text captions?
 
+Idea 1: augment an image in some way. The augmented image should have a similar embedding to the original embedding
+- rotate an image and predict the rotation
+- inpainting: crop / mask patches of an image and predict the missing patches
+
+This requires
+
+
 # DINOv1
 
 Create different sized crops of the same image
