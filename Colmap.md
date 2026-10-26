@@ -170,3 +170,13 @@ def point_triangulator():
 	
 ```
 
+
+## Dense Reconstruction
+
+3 stages
+- `image_undistorter`
+	- undistort images to pinhole
+	- [[Question]] why is this needed?
+- `patch_match_stereo`
+- `stereo_fusion`
+	- 

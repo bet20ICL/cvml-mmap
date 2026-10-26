@@ -1,0 +1,578 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Uniform cubic B-spline as a continuous-time trajectory</title>
+<style>
+  :root {
+    --bg: #f7f7f5; --card: #ffffff; --line: #e5e7eb; --ink: #1f2937; --muted: #6b7280;
+    --purple: #7c3aed; --teal: #0d9488; --orange: #ea580c;
+    --b0: #2563eb; --b1: #e11d48; --b2: #f59e0b; --b3: #65a30d;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  main { max-width: 720px; margin: 0 auto; padding: 16px 12px 40px; }
+  h1 { font-size: 20px; margin: 4px 0 4px; font-weight: 650; }
+  p.lead { margin: 0 0 12px; color: var(--muted); font-size: 14px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 12px; margin-bottom: 12px; }
+  .card h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 8px; font-weight: 600; }
+  .plot { position: relative; }
+  svg { display: block; width: 100%; height: auto; user-select: none; -webkit-user-select: none; }
+  .drag { cursor: grab; touch-action: none; }
+  .drag:active { cursor: grabbing; }
+  .controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-top: 8px; }
+  .controls input[type=range] { flex: 1 1 200px; accent-color: var(--purple); }
+  button {
+    font: inherit; font-size: 14px; border: 1px solid var(--line); background: #f3f4f6; color: var(--ink);
+    border-radius: 7px; padding: 5px 12px; cursor: pointer; min-width: 44px;
+  }
+  button:hover { background: #e5e7eb; }
+  label.toggle { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; cursor: pointer; }
+  label.toggle input { accent-color: var(--orange); width: 16px; height: 16px; }
+  .readout { font-variant-numeric: tabular-nums; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 14px; }
+  .legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12.5px; color: var(--muted); margin-top: 6px; }
+  .legend span::before { content: ""; display: inline-block; width: 14px; height: 3px; margin-right: 5px; vertical-align: middle; background: currentColor; }
+  .legend .lg-curve { color: var(--purple); } .legend .lg-cam { color: var(--teal); }
+  .legend .lg-poly { color: #9ca3af; } .legend .lg-se2 { color: var(--orange); }
+  .legend .lg-se2::before { background: repeating-linear-gradient(90deg, var(--orange) 0 3px, transparent 3px 6px); }
+  .legend > span > i { font-style: normal; color: var(--ink); }
+  .bars { display: grid; grid-template-columns: auto 1fr auto; gap: 6px 10px; align-items: center; margin-top: 8px; }
+  .bars .lab { font-size: 14px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .bars .lab b { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; }
+  .track { height: 14px; background: #f3f4f6; border-radius: 4px; overflow: hidden; }
+  .fill { height: 100%; border-radius: 4px; }
+  .val { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 14px; text-align: right; font-variant-numeric: tabular-nums; }
+  .sum { border-top: 1px solid var(--line); padding-top: 6px; }
+  .small { font-size: 12.5px; color: var(--muted); }
+  .tip {
+    position: absolute; pointer-events: none; background: #111827; color: #fff; font-size: 12px; line-height: 1.35;
+    padding: 5px 8px; border-radius: 6px; white-space: nowrap; transform: translate(-50%, calc(-100% - 12px));
+    font-variant-numeric: tabular-nums; display: none; z-index: 2;
+  }
+  #checks { font-size: 13px; padding: 8px 12px; border-radius: 8px; }
+  #checks.ok { background: #ecfdf5; color: #065f46; border: 1px solid #a7f3d0; }
+  #checks.bad { background: #fef2f2; color: #991b1b; border: 1px solid #fecaca; }
+  details summary { cursor: pointer; font-weight: 600; font-size: 14px; }
+  details .math { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12.5px; white-space: pre-wrap; background: #f9fafb; border: 1px solid var(--line); border-radius: 6px; padding: 8px; overflow-x: auto; }
+  .posecap { display: none; }
+  body.pose .posecap { display: block; }
+  @media (max-width: 480px) {
+    body { font-size: 14px; }
+    h1 { font-size: 17px; }
+    .card { padding: 9px; }
+    .bars .lab, .val, .readout { font-size: 12.5px; }
+    /* SVGs render at ~0.5x here; enlarge their labels to stay legible */
+    #top text { font-size: 22px; }
+    #basis text { font-size: 20px; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <h1>Uniform cubic B-spline as a continuous-time trajectory</h1>
+  <p class="lead">A trajectory stored as 8 control points can be queried at <em>any</em> time — e.g. at the irregular
+    timestamps of a camera, while the control points sit on a regular knot grid (Δt = 1). Each query blends just 4
+    neighbouring control points. Drag the points; hover the teal camera markers.</p>
+
+  <section class="card">
+    <h2>Trajectory</h2>
+    <div class="plot" id="topWrap">
+      <svg id="top" viewBox="0 0 680 330" aria-label="Spline trajectory"></svg>
+      <div class="tip" id="tip"></div>
+    </div>
+    <div class="controls">
+      <button id="play" aria-label="Play">▶</button>
+      <input id="t" type="range" min="0" max="4.99" step="0.01" value="1.40" aria-label="time t">
+      <label class="toggle"><input type="checkbox" id="pose"> Pose mode (SE(2))</label>
+      <button id="reset">Reset</button>
+    </div>
+    <div class="legend">
+      <span class="lg-curve">spline p(t)</span>
+      <span class="lg-poly">control polygon</span>
+      <span class="lg-cam">camera timestamps</span>
+      <span class="lg-se2 posecap" style="display:none" id="lgSe2">SE(2) position</span>
+    </div>
+    <p class="small posecap" style="margin:8px 0 0">
+      <b style="color:var(--orange)">Pose mode:</b> each control point is a pose T<sub>k</sub> = (θ<sub>k</sub>, c<sub>k</sub>);
+      drag the orange handles to rotate. The robot (triangle) is
+      T(t) = T<sub>i</sub> · Π<sub>j=1..3</sub> exp( B̃<sub>j</sub>(u) · log( T<sub>i+j−1</sub><sup>−1</sup> T<sub>i+j</sub> ) ),
+      evaluated on the Lie group SE(2), so position and heading are interpolated jointly (the orange dashed path can
+      deviate from the purple one when headings disagree with the path). With all headings equal it reduces exactly to
+      the plain spline. SE(3) works the same way — just swap in the so(3)/se(3) exp and log maps.
+    </p>
+  </section>
+
+  <section class="card">
+    <h2>Weights at the current time</h2>
+    <div class="readout" id="readout"></div>
+    <div class="bars" id="bars"></div>
+    <div class="small readout" id="cumline" style="margin-top:8px"></div>
+  </section>
+
+  <section class="card">
+    <h2>Basis functions over one segment, u ∈ [0, 1]</h2>
+    <svg id="basis" viewBox="0 0 680 210" aria-label="Basis functions"></svg>
+    <p class="small" style="margin:4px 0 0">The same four curves are reused in every segment (that is what "uniform" means).
+      At u = 1 the weights [0, 1/6, 2/3, 1/6] equal the u = 0 weights of the next segment shifted by one control point,
+      which is why the curve is C² continuous across knots.</p>
+  </section>
+
+  <section class="card">
+    <details>
+      <summary>The math</summary>
+      <div class="math">segment i = min(⌊t⌋, 4),  u = t − i ∈ [0, 1)
+
+p(t) = B0(u)·c_i + B1(u)·c_{i+1} + B2(u)·c_{i+2} + B3(u)·c_{i+3}
+  B0 = (1−u)³/6          B1 = (4 − 6u² + 3u³)/6
+  B2 = (1 + 3u + 3u² − 3u³)/6       B3 = u³/6
+
+Cumulative form (the one that generalises to Lie groups):
+p(t) = c_i + Σ_{j=1..3} B̃_j(u)·(c_{i+j} − c_{i+j−1})
+  B̃1 = (5 + 3u − 3u² + u³)/6   B̃2 = (1 + 3u + 3u² − 2u³)/6   B̃3 = u³/6
+  (B̃_j = Σ_{k≥j} B_k)
+
+SE(2):  exp(vx, vy, ω) → R = rot(ω), t = V(ω)·[vx, vy]
+  V(ω) = [[sinω/ω, −(1−cosω)/ω], [(1−cosω)/ω, sinω/ω]]
+  log(T) → ω = atan2(R), [vx, vy] = V(ω)⁻¹·t</div>
+    </details>
+  </section>
+
+  <div id="checks">running checks…</div>
+</main>
+
+<script>
+"use strict";
+// ---------------------------------------------------------------- data
+const W = 680, H = 330;
+const DEFAULT_C = [[40,250],[110,110],[210,70],[300,200],[400,250],[490,120],[570,80],[640,210]];
+const TS = [0.37, 0.91, 1.62, 2.05, 2.88, 3.41, 4.13, 4.77];
+const NSEG = 5, TMAX = 5;
+const COL = ["#2563eb", "#e11d48", "#f59e0b", "#65a30d"];
+const PURPLE = "#7c3aed", TEAL = "#0d9488", ORANGE = "#ea580c", GREY = "#9ca3af";
+
+function defaultHeadings(P) {
+  return P.map((_, k) => {
+    const a = k < P.length - 1 ? P[k] : P[k - 1];
+    const b = k < P.length - 1 ? P[k + 1] : P[k];
+    return Math.atan2(b[1] - a[1], b[0] - a[0]);
+  });
+}
+let C = DEFAULT_C.map(p => p.slice());
+let TH = defaultHeadings(C);
+
+// ---------------------------------------------------------------- spline math
+function seg(t) {
+  let i = Math.floor(t);
+  i = Math.max(0, Math.min(i, NSEG - 1));
+  return [i, t - i];
+}
+function basis(u) {
+  const u2 = u * u, u3 = u2 * u, m = 1 - u;
+  return [m * m * m / 6, (4 - 6 * u2 + 3 * u3) / 6, (1 + 3 * u + 3 * u2 - 3 * u3) / 6, u3 / 6];
+}
+function dbasis(u) {
+  const m = 1 - u;
+  return [-m * m / 2, (-12 * u + 9 * u * u) / 6, (3 + 6 * u - 9 * u * u) / 6, u * u / 2];
+}
+function cbasis(u) { // cumulative B̃_0..B̃_3 (B̃_0 = 1)
+  const u2 = u * u, u3 = u2 * u;
+  return [1, (5 + 3 * u - 3 * u2 + u3) / 6, (1 + 3 * u + 3 * u2 - 2 * u3) / 6, u3 / 6];
+}
+function evalP(t, P = C) {
+  const [i, u] = seg(t), b = basis(u);
+  let x = 0, y = 0;
+  for (let j = 0; j < 4; j++) { x += b[j] * P[i + j][0]; y += b[j] * P[i + j][1]; }
+  return [x, y];
+}
+function evalD(t, P = C) { // dp/dt (Δt = 1 so d/du = d/dt)
+  const [i, u] = seg(t), b = dbasis(u);
+  let x = 0, y = 0;
+  for (let j = 0; j < 4; j++) { x += b[j] * P[i + j][0]; y += b[j] * P[i + j][1]; }
+  return [x, y];
+}
+function evalCum(t, P = C) {
+  const [i, u] = seg(t), b = cbasis(u);
+  let x = P[i][0], y = P[i][1];
+  for (let j = 1; j <= 3; j++) {
+    x += b[j] * (P[i + j][0] - P[i + j - 1][0]);
+    y += b[j] * (P[i + j][1] - P[i + j - 1][1]);
+  }
+  return [x, y];
+}
+
+// ---------------------------------------------------------------- SE(2)
+// pose = {th, x, y}; tangent = {vx, vy, w}
+function mul(a, b) {
+  const c = Math.cos(a.th), s = Math.sin(a.th);
+  return { th: a.th + b.th, x: a.x + c * b.x - s * b.y, y: a.y + s * b.x + c * b.y };
+}
+function inv(a) {
+  const c = Math.cos(a.th), s = Math.sin(a.th);
+  return { th: -a.th, x: -(c * a.x + s * a.y), y: -(-s * a.x + c * a.y) };
+}
+function vCoeffs(w) { // V(ω) = [[A, -B], [B, A]]
+  if (Math.abs(w) < 1e-6) return [1 - w * w / 6, w / 2 - w * w * w / 24];
+  return [Math.sin(w) / w, (1 - Math.cos(w)) / w];
+}
+function se2exp(v) {
+  const [A, B] = vCoeffs(v.w);
+  return { th: v.w, x: A * v.vx - B * v.vy, y: B * v.vx + A * v.vy };
+}
+function se2log(T) {
+  const w = Math.atan2(Math.sin(T.th), Math.cos(T.th));
+  const [A, B] = vCoeffs(w), det = A * A + B * B;
+  return { vx: (A * T.x + B * T.y) / det, vy: (-B * T.x + A * T.y) / det, w };
+}
+function evalPose(t, P = C, TK = TH) {
+  const [i, u] = seg(t), b = cbasis(u);
+  const pose = k => ({ th: TK[k], x: P[k][0], y: P[k][1] });
+  let T = pose(i);
+  for (let j = 1; j <= 3; j++) {
+    const d = se2log(mul(inv(pose(i + j - 1)), pose(i + j)));
+    T = mul(T, se2exp({ vx: b[j] * d.vx, vy: b[j] * d.vy, w: b[j] * d.w }));
+  }
+  return T;
+}
+
+// ---------------------------------------------------------------- acceptance checks
+function runChecks() {
+  const res = [];
+  const add = (name, ok, detail) => res.push({ name, ok, detail });
+  const P0 = DEFAULT_C.map(p => p.slice());
+
+  const us = [0, 0.25, 0.5, 0.75, 0.999];
+  const sums = us.map(u => basis(u).reduce((a, b) => a + b, 0));
+  add("weights sum to 1 for u ∈ {0, .25, .5, .75, .999}", sums.every(s => Math.abs(s - 1) < 1e-12),
+      sums.map(s => s.toFixed(15)).join(", "));
+
+  const b0 = basis(0), exp0 = [1 / 6, 2 / 3, 1 / 6, 0];
+  add("B(0) = [1/6, 2/3, 1/6, 0]", b0.every((v, k) => Math.abs(v - exp0[k]) < 1e-12),
+      "[" + b0.map(v => v.toFixed(6)).join(", ") + "]");
+
+  const p15 = evalP(1.5, P0), p00 = evalP(0, P0);
+  add("p(1.5) ≈ (255.0, 136.9)", Math.abs(p15[0] - 255.0) < 0.05 && Math.abs(p15[1] - 136.9) < 0.05,
+      `(${p15[0].toFixed(4)}, ${p15[1].toFixed(4)})`);
+  add("p(0) ≈ (115.0, 126.7)", Math.abs(p00[0] - 115.0) < 0.05 && Math.abs(p00[1] - 126.7) < 0.05,
+      `(${p00[0].toFixed(4)}, ${p00[1].toFixed(4)})`);
+
+  let maxErr = 0;
+  for (let n = 0; n < 100; n++) {
+    const t = Math.random() * TMAX, a = evalP(t, P0), b = evalCum(t, P0);
+    maxErr = Math.max(maxErr, Math.hypot(a[0] - b[0], a[1] - b[1]));
+  }
+  add("direct == cumulative at 100 random t (< 1e-9)", maxErr < 1e-9, "max err " + maxErr.toExponential(2));
+
+  let maxPoseErr = 0;
+  for (const th of [0, 0.7, -2.3]) {
+    const TK = P0.map(() => th);
+    for (let n = 0; n < 100; n++) {
+      const t = Math.random() * TMAX, a = evalP(t, P0), T = evalPose(t, P0, TK);
+      maxPoseErr = Math.max(maxPoseErr, Math.hypot(a[0] - T.x, a[1] - T.y));
+    }
+  }
+  add("SE(2) position == spline with equal headings (< 1e-6)", maxPoseErr < 1e-6,
+      "max err " + maxPoseErr.toExponential(2));
+
+  console.group("B-spline acceptance checks");
+  res.forEach(r => console.log((r.ok ? "✔ PASS " : "✘ FAIL ") + r.name + " — " + r.detail));
+  const allOk = res.every(r => r.ok);
+  console.log(allOk ? "checks passed" : "SOME CHECKS FAILED");
+  console.groupEnd();
+
+  const box = document.getElementById("checks");
+  box.className = allOk ? "ok" : "bad";
+  box.textContent = allOk
+    ? `✔ checks passed (${res.length}/${res.length}) — details in the browser console`
+    : "✘ checks failed: " + res.filter(r => !r.ok).map(r => r.name + " [" + r.detail + "]").join("; ");
+}
+
+// ---------------------------------------------------------------- svg helpers
+const NS = "http://www.w3.org/2000/svg";
+function el(tag, attrs, parent) {
+  const e = document.createElementNS(NS, tag);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  if (parent) parent.appendChild(e);
+  return e;
+}
+function setA(e, attrs) { for (const k in attrs) e.setAttribute(k, attrs[k]); }
+const f1 = v => v.toFixed(1);
+function pathOf(fn, t0, t1, step) {
+  let d = "";
+  for (let t = t0; t <= t1 + 1e-9; t += step) {
+    const p = fn(Math.min(t, t1));
+    d += (d ? "L" : "M") + f1(p[0]) + " " + f1(p[1]);
+  }
+  return d;
+}
+
+// ---------------------------------------------------------------- top panel
+const topSvg = document.getElementById("top");
+const topWrap = document.getElementById("topWrap");
+const tip = document.getElementById("tip");
+const defs = el("defs", {}, topSvg);
+const mk = el("marker", { id: "arrow", viewBox: "0 0 10 10", refX: 8, refY: 5, markerWidth: 7, markerHeight: 7, orient: "auto-start-reverse" }, defs);
+el("path", { d: "M0 0 L10 5 L0 10 z", fill: "#111827" }, mk);
+
+const poly = el("polyline", { fill: "none", stroke: GREY, "stroke-width": 1.5, "stroke-dasharray": "5 5" }, topSvg);
+const curve = el("path", { fill: "none", stroke: PURPLE, "stroke-width": 3, "stroke-linecap": "round", "stroke-linejoin": "round" }, topSvg);
+const se2Path = el("path", { fill: "none", stroke: ORANGE, "stroke-width": 2, "stroke-dasharray": "3 4", display: "none" }, topSvg);
+const gW = el("g", {}, topSvg);
+const wLines = COL.map(c => el("line", { stroke: c, "stroke-opacity": 0.55, "stroke-linecap": "round" }, gW));
+const gCam = el("g", {}, topSvg);
+const gCP = el("g", {}, topSvg);
+const gHead = el("g", { display: "none" }, topSvg);
+const arrow = el("line", { stroke: "#111827", "stroke-width": 2, "marker-end": "url(#arrow)" }, topSvg);
+const pdot = el("circle", { r: 6.5, fill: PURPLE, stroke: "#fff", "stroke-width": 2 }, topSvg);
+const robot = el("polygon", { points: "16,0 -9,8 -5,0 -9,-8", fill: ORANGE, stroke: "#fff", "stroke-width": 1.5, "stroke-linejoin": "round", display: "none" }, topSvg);
+
+// control points
+const cpEls = C.map((_, k) => {
+  const g = el("g", { class: "drag" }, gCP);
+  const ring = el("circle", { r: 11, fill: "none", "stroke-width": 3 }, g);
+  const dot = el("circle", { r: 6, fill: GREY, stroke: "#fff", "stroke-width": 1.5 }, g);
+  const hit = el("circle", { r: 16, fill: "transparent" }, g);
+  const lab = el("text", { "font-size": 14, fill: "#4b5563", "text-anchor": "middle", "pointer-events": "none" }, g);
+  lab.textContent = "c" + k;
+  makeDraggable(g, p => { C[k] = [clamp(p.x, 0, W), clamp(p.y, 0, H)]; });
+  return { g, ring, dot, hit, lab };
+});
+// heading handles (pose mode)
+const headEls = C.map((_, k) => {
+  const line = el("line", { stroke: ORANGE, "stroke-width": 2, "pointer-events": "none" }, gHead);
+  const g = el("g", { class: "drag" }, gHead);
+  const knob = el("circle", { r: 5.5, fill: "#fff", stroke: ORANGE, "stroke-width": 2 }, g);
+  const hit = el("circle", { r: 14, fill: "transparent" }, g);
+  makeDraggable(g, p => { TH[k] = Math.atan2(p.y - C[k][1], p.x - C[k][0]); });
+  return { line, g, knob, hit };
+});
+const HEAD_LEN = 30;
+
+// camera markers
+const camEls = TS.map((ts, k) => {
+  const tick = el("line", { stroke: TEAL, "stroke-width": 2.5, "stroke-linecap": "round", display: "none" }, gCam);
+  const g = el("g", { style: "cursor: help" }, gCam);
+  const dot = el("circle", { r: 5, fill: TEAL, stroke: "#fff", "stroke-width": 1.5 }, g);
+  const hit = el("circle", { r: 12, fill: "transparent" }, g);
+  const show = () => showTip(k);
+  g.addEventListener("pointerenter", show);
+  g.addEventListener("pointerdown", show);
+  g.addEventListener("pointerleave", () => { tip.style.display = "none"; hoverCam = -1; });
+  return { tick, g, dot, hit };
+});
+let hoverCam = -1;
+function showTip(k) {
+  hoverCam = k;
+  const ts = TS[k];
+  let html, x, y;
+  if (poseMode) {
+    const T = evalPose(ts);
+    x = T.x; y = T.y;
+    html = `camera t = ${ts.toFixed(2)}<br>T(t): (${T.x.toFixed(1)}, ${T.y.toFixed(1)}), θ = ${(T.th * 180 / Math.PI).toFixed(1)}°`;
+  } else {
+    [x, y] = evalP(ts);
+    html = `camera t = ${ts.toFixed(2)}<br>p(t) = (${x.toFixed(1)}, ${y.toFixed(1)})`;
+  }
+  tip.innerHTML = html;
+  const pt = topSvg.createSVGPoint(); pt.x = x; pt.y = y;
+  const s = pt.matrixTransform(topSvg.getScreenCTM());
+  const r = topWrap.getBoundingClientRect();
+  const left = clamp(s.x - r.left, 70, r.width - 70);
+  tip.style.left = left + "px";
+  tip.style.top = (s.y - r.top) + "px";
+  tip.style.display = "block";
+}
+
+function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
+function svgPt(e) {
+  const p = topSvg.createSVGPoint(); p.x = e.clientX; p.y = e.clientY;
+  return p.matrixTransform(topSvg.getScreenCTM().inverse());
+}
+function makeDraggable(node, onMove) {
+  node.addEventListener("touchstart", e => e.preventDefault(), { passive: false });
+  node.addEventListener("pointerdown", e => {
+    e.preventDefault();
+    node.setPointerCapture(e.pointerId);
+    const move = ev => { onMove(svgPt(ev)); render(); };
+    const up = () => {
+      node.removeEventListener("pointermove", move);
+      node.removeEventListener("pointerup", up);
+      node.removeEventListener("pointercancel", up);
+    };
+    node.addEventListener("pointermove", move);
+    node.addEventListener("pointerup", up);
+    node.addEventListener("pointercancel", up);
+  });
+}
+
+// ---------------------------------------------------------------- weights readout
+const readout = document.getElementById("readout");
+const cumline = document.getElementById("cumline");
+const barsEl = document.getElementById("bars");
+const barRows = COL.map((c, j) => {
+  const lab = document.createElement("div"); lab.className = "lab";
+  const track = document.createElement("div"); track.className = "track";
+  const fill = document.createElement("div"); fill.className = "fill"; fill.style.background = c;
+  track.appendChild(fill);
+  const val = document.createElement("div"); val.className = "val";
+  barsEl.append(lab, track, val);
+  return { lab, fill, val };
+});
+const sumLab = document.createElement("div"); sumLab.className = "lab sum"; sumLab.textContent = "Σ Bj";
+const sumPad = document.createElement("div"); sumPad.className = "sum"; sumPad.style.alignSelf = "stretch";
+const sumVal = document.createElement("div"); sumVal.className = "val sum";
+barsEl.append(sumLab, sumPad, sumVal);
+
+// ---------------------------------------------------------------- basis panel
+const bsv = document.getElementById("basis");
+const BL = 48, BR = 660, BT = 14, BB = 178, VMAX = 0.72;
+const bx = u => BL + u * (BR - BL), by = v => BB - v / VMAX * (BB - BT);
+[[0, "0"], [1 / 6, "1/6"], [1 / 3, "1/3"], [1 / 2, "1/2"], [2 / 3, "2/3"]].forEach(([v, s]) => {
+  el("line", { x1: BL, x2: BR, y1: by(v), y2: by(v), stroke: v === 0 ? "#9ca3af" : "#eef0f2", "stroke-width": 1 }, bsv);
+  el("text", { x: BL - 8, y: by(v) + 4, "font-size": 13, fill: "#6b7280", "text-anchor": "end" }, bsv).textContent = s;
+});
+[0, 0.25, 0.5, 0.75, 1].forEach(u => {
+  el("line", { x1: bx(u), x2: bx(u), y1: BB, y2: BB + 5, stroke: "#9ca3af" }, bsv);
+  el("text", { x: bx(u), y: BB + 20, "font-size": 13, fill: "#6b7280", "text-anchor": "middle" }, bsv).textContent = u;
+});
+COL.forEach((c, j) => {
+  let d = "";
+  for (let n = 0; n <= 200; n++) { const u = n / 200; d += (n ? "L" : "M") + f1(bx(u)) + " " + f1(by(basis(u)[j])); }
+  el("path", { d, fill: "none", stroke: c, "stroke-width": 2.5 }, bsv);
+});
+[[0, 0.06], [1, 0.14], [2, 0.86], [3, 0.94]].forEach(([j, u]) => {
+  const v = basis(u)[j];
+  el("text", { x: bx(u), y: by(v) - 7, "font-size": 14, "font-weight": 600, fill: COL[j], "text-anchor": "middle" }, bsv).textContent = "B" + j;
+});
+const uLine = el("line", { y1: BT - 4, y2: BB, stroke: "#111827", "stroke-width": 1.5, "stroke-dasharray": "4 3" }, bsv);
+const uDots = COL.map(c => el("circle", { r: 5.5, fill: c, stroke: "#fff", "stroke-width": 1.5 }, bsv));
+const uText = el("text", { y: BT + 8, "font-size": 13, fill: "#111827" }, bsv);
+
+// ---------------------------------------------------------------- state & render
+const slider = document.getElementById("t");
+const playBtn = document.getElementById("play");
+const poseBox = document.getElementById("pose");
+let t = parseFloat(slider.value);
+let poseMode = false;
+
+function render() {
+  const [i, u] = seg(t);
+  const w = basis(u);
+  const p = evalP(t), pc = evalCum(t), d = evalD(t);
+
+  poly.setAttribute("points", C.map(q => q[0] + "," + q[1]).join(" "));
+  curve.setAttribute("d", pathOf(tt => evalP(tt), 0, TMAX - 1e-9, 0.01));
+
+  cpEls.forEach((e, k) => {
+    const [x, y] = C[k], active = k >= i && k <= i + 3;
+    setA(e.ring, { cx: x, cy: y, stroke: active ? COL[k - i] : "none" });
+    setA(e.dot, { cx: x, cy: y, fill: active ? COL[k - i] : GREY });
+    setA(e.hit, { cx: x, cy: y });
+    const below = y < 24;
+    setA(e.lab, { x: x, y: below ? y + 30 : y - 16, fill: active ? COL[k - i] : "#4b5563", "font-weight": active ? 700 : 400 });
+  });
+
+  wLines.forEach((ln, j) => {
+    const q = C[i + j];
+    setA(ln, { x1: q[0], y1: q[1], x2: p[0], y2: p[1], "stroke-width": (0.6 + 14 * w[j]).toFixed(2) });
+  });
+
+  const AS = 0.3;
+  setA(arrow, { x1: p[0], y1: p[1], x2: p[0] + d[0] * AS, y2: p[1] + d[1] * AS });
+  setA(pdot, { cx: p[0], cy: p[1] });
+
+  camEls.forEach((e, k) => {
+    let x, y;
+    if (poseMode) {
+      const T = evalPose(TS[k]);
+      x = T.x; y = T.y;
+      setA(e.tick, { x1: x, y1: y, x2: x + 18 * Math.cos(T.th), y2: y + 18 * Math.sin(T.th), display: "inline" });
+    } else {
+      [x, y] = evalP(TS[k]);
+      e.tick.setAttribute("display", "none");
+    }
+    setA(e.dot, { cx: x, cy: y }); setA(e.hit, { cx: x, cy: y });
+  });
+
+  if (poseMode) {
+    se2Path.setAttribute("d", pathOf(tt => { const T = evalPose(tt); return [T.x, T.y]; }, 0, TMAX - 1e-9, 0.02));
+    const T = evalPose(t);
+    setA(robot, { transform: `translate(${f1(T.x)} ${f1(T.y)}) rotate(${(T.th * 180 / Math.PI).toFixed(2)})` });
+    headEls.forEach((e, k) => {
+      const [x, y] = C[k], hx = x + HEAD_LEN * Math.cos(TH[k]), hy = y + HEAD_LEN * Math.sin(TH[k]);
+      setA(e.line, { x1: x, y1: y, x2: hx, y2: hy });
+      setA(e.knob, { cx: hx, cy: hy }); setA(e.hit, { cx: hx, cy: hy });
+    });
+  }
+
+  // readout
+  readout.textContent = `t = ${t.toFixed(2)}, segment ${i}, u = ${u.toFixed(2)}`;
+  barRows.forEach((r, j) => {
+    r.lab.innerHTML = `<b style="background:${COL[j]}"></b>B${j} × c${i + j}`;
+    r.fill.style.width = (w[j] * 100).toFixed(2) + "%";
+    r.val.textContent = w[j].toFixed(3);
+  });
+  sumVal.textContent = w.reduce((a, b) => a + b, 0).toFixed(3);
+  const cb = cbasis(u);
+  let cum = `direct p(t) = (${p[0].toFixed(3)}, ${p[1].toFixed(3)})\n` +
+            `cumulative   = (${pc[0].toFixed(3)}, ${pc[1].toFixed(3)})  with B̃1..3 = ${cb.slice(1).map(v => v.toFixed(3)).join(", ")}`;
+  if (poseMode) {
+    const T = evalPose(t);
+    cum += `\nSE(2) T(t)   = (${T.x.toFixed(3)}, ${T.y.toFixed(3)}), θ = ${(T.th * 180 / Math.PI).toFixed(1)}°`;
+  }
+  cumline.style.whiteSpace = "pre-wrap";
+  cumline.textContent = cum;
+
+  // basis marker
+  const ux = bx(u);
+  setA(uLine, { x1: ux, x2: ux });
+  uDots.forEach((c, j) => setA(c, { cx: ux, cy: by(w[j]) }));
+  setA(uText, { x: u > 0.85 ? ux - 8 : ux + 8, "text-anchor": u > 0.85 ? "end" : "start" });
+  uText.textContent = "u = " + u.toFixed(2);
+
+  if (hoverCam >= 0) showTip(hoverCam);
+}
+
+// ---------------------------------------------------------------- controls
+slider.addEventListener("input", () => { t = parseFloat(slider.value); render(); });
+
+let playing = false, lastTs = 0;
+const SPEED = 0.6; // t units per second
+function tick(ts) {
+  if (!playing) return;
+  const dt = Math.min(0.1, (ts - lastTs) / 1000);
+  lastTs = ts;
+  t += dt * SPEED;
+  if (t >= TMAX) t -= TMAX;
+  slider.value = t.toFixed(2);
+  render();
+  requestAnimationFrame(tick);
+}
+playBtn.addEventListener("click", () => {
+  playing = !playing;
+  playBtn.textContent = playing ? "❚❚" : "▶";
+  playBtn.setAttribute("aria-label", playing ? "Pause" : "Play");
+  if (playing) { lastTs = performance.now(); requestAnimationFrame(tick); }
+});
+poseBox.addEventListener("change", () => {
+  poseMode = poseBox.checked;
+  document.body.classList.toggle("pose", poseMode);
+  document.getElementById("lgSe2").style.display = poseMode ? "inline" : "none";
+  [se2Path, robot, gHead].forEach(e => e.setAttribute("display", poseMode ? "inline" : "none"));
+  render();
+});
+document.getElementById("reset").addEventListener("click", () => {
+  C = DEFAULT_C.map(p => p.slice());
+  TH = defaultHeadings(C);
+  render();
+});
+window.addEventListener("resize", () => { if (hoverCam >= 0) showTip(hoverCam); });
+
+runChecks();
+render();
+</script>
+</body>
+</html>

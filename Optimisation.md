@@ -1,0 +1,2 @@
+Gauss-Newton
+Levenberg Marquadt
